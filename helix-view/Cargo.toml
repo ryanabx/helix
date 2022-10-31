@@ -29,6 +29,7 @@ anyhow = "1"
 termina = { workspace = true, optional = true }
 
 tempfile.workspace = true
+helix-vte = { version = "0.1", path = "../helix-vte" }
 
 # Conversion traits
 once_cell = "1.21"
@@ -53,6 +54,7 @@ parking_lot.workspace = true
 thiserror.workspace = true
 
 kstring = "2.0"
+alacritty_terminal = "0.25.1"
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = { version = "5.4", features = ["std"] }
