@@ -55,6 +55,7 @@ thiserror.workspace = true
 
 kstring = "2.0"
 alacritty_terminal = "0.25.1"
+termwiz = "0.23.3"
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = { version = "5.4", features = ["std"] }

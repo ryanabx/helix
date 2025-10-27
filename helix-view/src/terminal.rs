@@ -11,12 +11,13 @@ use alacritty_terminal::{
 };
 
 use helix_vte::{PtyEvent, TerminalId, VteRegistry};
+use termwiz::{input::{KeyCodeEncodeModes, KeyboardEncoding}, terminal::Terminal};
 use tokio::{select, sync::mpsc};
 use tokio_stream::StreamExt;
 
 use crate::{
     graphics::{Color, CursorKind},
-    input::{self, KeyCode, KeyModifiers, MouseEvent},
+    input::{self, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent},
 };
 
 impl From<ansi::CursorShape> for CursorKind {
@@ -90,185 +91,177 @@ pub enum ChordState {
 
 struct TerminalModel {
     state: TerminalState,
-    parser: ansi::Processor,
+    parser: termwiz::escape::parser::Parser,
+    surface: termwiz::surface::Surface,
     term: Term<Listener>,
+    input_parser: termwiz::input::InputParser,
 }
 
 impl TerminalModel {
     #[inline]
-    fn advance<D: IntoIterator<Item = u8>>(&mut self, data: D) {
-        for b in data {
-            self.parser.advance(&mut self.term, &[b]);
-        }
+    fn advance(&mut self, data: &[u8]) {
+        self.parser.parse(&data, |action| {});
     }
 
     #[inline]
     fn resize(&mut self, size: (u16, u16)) {
-        self.term.resize(TermSize::new(size.1 as _, size.0 as _));
+        self.surface.resize(size.1 as _, size.0 as _);
     }
 }
 
-fn resolve_key_event(mut key: input::KeyEvent) -> Option<&'static str> {
-    use crate::input::KeyModifiers;
-
-    key.modifiers =
-        (KeyModifiers::ALT | KeyModifiers::CONTROL | KeyModifiers::SHIFT) & key.modifiers;
-
-    // Generates a `Modifiers` value to check against.
-    macro_rules! modifiers {
-            (ctrl) => {
-                KeyModifiers::CONTROL
-            };
-
-            (alt) => {
-                KeyModifiers::ALT
-            };
-
-            (shift) => {
-                KeyModifiers::SHIFT
-            };
-
-            ($mod:ident $(| $($mods:ident)|+)?) => {
-                modifiers!($mod) $(| modifiers!($($mods)|+) )?
-            };
-        }
-
-    // Generates modifier values for ANSI sequences.
-    macro_rules! modval {
-        (shift) => {
-            // 1
-            "2"
-        };
-        (alt) => {
-            // 2
-            "3"
-        };
-        (alt | shift) => {
-            // 1 + 2
-            "4"
-        };
-        (ctrl) => {
-            // 4
-            "5"
-        };
-        (ctrl | shift) => {
-            // 1 + 4
-            "6"
-        };
-        (alt | ctrl) => {
-            // 2 + 4
-            "7"
-        };
-        (alt | ctrl | shift) => {
-            // 1 + 2 + 4
-            "8"
-        };
+fn encode_from_input(input: &termwiz::input::InputEvent) -> Vec<u8> {
+    match input {
+        termwiz::input::InputEvent::Key(key_event) => key_event.key.encode(key_event.modifiers, KeyCodeEncodeModes {
+            
+        }, is_down),
+        termwiz::input::InputEvent::Mouse(mouse_event) => todo!(),
+        termwiz::input::InputEvent::PixelMouse(pixel_mouse_event) => todo!(),
+        termwiz::input::InputEvent::Resized { cols, rows } => todo!(),
+        termwiz::input::InputEvent::Paste(_) => todo!(),
+        termwiz::input::InputEvent::Wake => todo!(),
     }
+}
 
-    // Generates ANSI sequences to move the cursor by one position.
-    macro_rules! term_sequence {
-            // Generate every modifier combination (except meta)
-            ([all], $evt:ident, $no_mod:literal, $pre:literal, $post:literal) => {
-                {
-                    term_sequence!([], $evt, $no_mod);
-                    term_sequence!([shift, alt, ctrl], $evt, $pre, $post);
-                    term_sequence!([alt | shift, ctrl | shift, alt | ctrl], $evt, $pre, $post);
-                    term_sequence!([alt | ctrl | shift], $evt, $pre, $post);
-                    return None;
-                }
-            };
-            // No modifiers
-            ([], $evt:ident, $no_mod:literal) => {
-                if $evt.modifiers.is_empty() {
-                    return Some($no_mod);
-                }
-            };
-            // A single modifier combination
-            ([$($mod:ident)|+], $evt:ident, $pre:literal, $post:literal) => {
-                if $evt.modifiers == modifiers!($($mod)|+) {
-                    return Some(concat!($pre, modval!($($mod)|+), $post));
-                }
-            };
-            // Break down multiple modifiers into a series of single combination branches
-            ([$($($mod:ident)|+),+], $evt:ident, $pre:literal, $post:literal) => {
-                $(
-                    term_sequence!([$($mod)|+], $evt, $pre, $post);
-                )+
-            };
+fn input_from_input(input: &input::Event) -> termwiz::input::InputEvent {
+    match input {
+        input::Event::FocusGained => todo!("input::Event::FocusGained"),
+        input::Event::FocusLost => todo!("input::Event::FocusLost"),
+        input::Event::Key(key_event) => {
+            termwiz::input::InputEvent::Key(self::key_event_to_termwiz(key_event))
         }
-
-    match key.code {
-        input::KeyCode::Char(c) => {
-            if key.modifiers == KeyModifiers::CONTROL {
-                // Convert the character into its index (into a control character).
-                // In essence, this turns `ctrl+h` into `^h`
-                let str = match c {
-                    '@' => "\x00",
-                    'a' => "\x01",
-                    'b' => "\x02",
-                    'c' => "\x03",
-                    'd' => "\x04",
-                    'e' => "\x05",
-                    'f' => "\x06",
-                    'g' => "\x07",
-                    'h' => "\x08",
-                    'i' => "\x09",
-                    'j' => "\x0a",
-                    'k' => "\x0b",
-                    'l' => "\x0c",
-                    'm' => "\x0d",
-                    'n' => "\x0e",
-                    'o' => "\x0f",
-                    'p' => "\x10",
-                    'q' => "\x11",
-                    'r' => "\x12",
-                    's' => "\x13",
-                    't' => "\x14",
-                    'u' => "\x15",
-                    'v' => "\x16",
-                    'w' => "\x17",
-                    'x' => "\x18",
-                    'y' => "\x19",
-                    'z' => "\x1a",
-                    '[' => "\x1b",
-                    '\\' => "\x1c",
-                    ']' => "\x1d",
-                    '^' => "\x1e",
-                    '_' => "\x1f",
-                    _ => return None,
-                };
-
-                Some(str)
-            } else {
-                None
-            }
-        }
-
-        input::KeyCode::Backspace => {
-            Some(if key.modifiers.contains(KeyModifiers::CONTROL) {
-                "\x08" // backspace
-            } else if key.modifiers.contains(KeyModifiers::ALT) {
-                "\x1b\x7f"
-            } else {
-                "\x7f"
+        input::Event::Mouse(mouse_event) => {
+            termwiz::input::InputEvent::Mouse(termwiz::input::MouseEvent {
+                x: mouse_event.column,
+                y: mouse_event.row,
+                modifiers: self::key_modifiers_to_termwiz(&mouse_event.modifiers),
+                mouse_buttons: {
+                    match mouse_event.kind {
+                        input::MouseEventKind::Down(mouse_button) => {
+                            self::mouse_button_to_termwiz(&mouse_button)
+                        }
+                        input::MouseEventKind::Up(_mouse_button) => {
+                            termwiz::input::MouseButtons::NONE
+                        }
+                        input::MouseEventKind::Drag(mouse_button) => {
+                            self::mouse_button_to_termwiz(&mouse_button)
+                        }
+                        input::MouseEventKind::Moved => termwiz::input::MouseButtons::NONE,
+                        input::MouseEventKind::ScrollDown => {
+                            termwiz::input::MouseButtons::VERT_WHEEL
+                        }
+                        input::MouseEventKind::ScrollUp => termwiz::input::MouseButtons::VERT_WHEEL,
+                        input::MouseEventKind::ScrollLeft => {
+                            termwiz::input::MouseButtons::HORZ_WHEEL
+                        }
+                        input::MouseEventKind::ScrollRight => {
+                            termwiz::input::MouseButtons::HORZ_WHEEL
+                        }
+                    }
+                },
             })
         }
-
-        input::KeyCode::Tab => Some("\x09"),
-        input::KeyCode::Enter => Some("\r"),
-        input::KeyCode::Esc => Some("\x1b"),
-
-        // The following either expands to `\x1b[X` or `\x1b[1;NX` where N is a modifier value
-        input::KeyCode::Up => term_sequence!([all], key, "\x1b[A", "\x1b[1;", "A"),
-        input::KeyCode::Down => term_sequence!([all], key, "\x1b[B", "\x1b[1;", "B"),
-        input::KeyCode::Right => term_sequence!([all], key, "\x1b[C", "\x1b[1;", "C"),
-        input::KeyCode::Left => term_sequence!([all], key, "\x1b[D", "\x1b[1;", "D"),
-        input::KeyCode::Home => term_sequence!([all], key, "\x1bOH", "\x1b[1;", "H"),
-        input::KeyCode::End => term_sequence!([all], key, "\x1bOF", "\x1b[1;", "F"),
-        input::KeyCode::Insert => term_sequence!([all], key, "\x1b[2~", "\x1b[2;", "~"),
-        input::KeyCode::Delete => term_sequence!([all], key, "\x1b[3~", "\x1b[3;", "~"),
-        _ => None,
+        input::Event::Paste(content) => termwiz::input::InputEvent::Paste(content),
+        input::Event::Resize(cols, rows) => termwiz::input::InputEvent::Resized {
+            cols: *cols as _,
+            rows: *rows as _,
+        },
+        input::Event::IdleTimeout => todo!("input::Event::IdleTimeout"),
     }
+}
+
+fn key_event_to_termwiz(evt: &KeyEvent) -> termwiz::input::KeyEvent {
+    termwiz::input::KeyEvent {
+        key: self::key_code_to_termwiz(&evt.code),
+        modifiers: self::key_modifiers_to_termwiz(&evt.modifiers),
+    }
+}
+
+fn key_code_to_termwiz(code: &KeyCode) -> termwiz::input::KeyCode {
+    match code {
+        KeyCode::Backspace => termwiz::input::KeyCode::Backspace,
+        KeyCode::Enter => termwiz::input::KeyCode::Enter,
+        KeyCode::Left => termwiz::input::KeyCode::LeftArrow,
+        KeyCode::Right => termwiz::input::KeyCode::RightArrow,
+        KeyCode::Up => termwiz::input::KeyCode::UpArrow,
+        KeyCode::Down => termwiz::input::KeyCode::DownArrow,
+        KeyCode::Home => termwiz::input::KeyCode::Home,
+        KeyCode::End => termwiz::input::KeyCode::End,
+        KeyCode::PageUp => termwiz::input::KeyCode::PageUp,
+        KeyCode::PageDown => termwiz::input::KeyCode::PageDown,
+        KeyCode::Tab => termwiz::input::KeyCode::Tab,
+        KeyCode::Delete => termwiz::input::KeyCode::Delete,
+        KeyCode::Insert => termwiz::input::KeyCode::Insert,
+        KeyCode::F(f) => termwiz::input::KeyCode::Function(f),
+        KeyCode::Char(c) => termwiz::input::KeyCode::Char(c),
+        KeyCode::Null => todo!("termwiz::input::KeyCode::Null"),
+        KeyCode::Esc => termwiz::input::KeyCode::Escape,
+        KeyCode::CapsLock => termwiz::input::KeyCode::CapsLock,
+        KeyCode::ScrollLock => termwiz::input::KeyCode::ScrollLock,
+        KeyCode::NumLock => termwiz::input::KeyCode::NumLock,
+        KeyCode::PrintScreen => termwiz::input::KeyCode::PrintScreen,
+        KeyCode::Pause => termwiz::input::KeyCode::Pause,
+        KeyCode::Menu => termwiz::input::KeyCode::Menu,
+        KeyCode::KeypadBegin => termwiz::input::KeyCode::KeyPadBegin,
+        KeyCode::Media(media_key_code) => match media_key_code {
+            input::MediaKeyCode::Play => todo!("termwiz::input::KeyCode::MediaPlay"),
+            input::MediaKeyCode::Pause => todo!("termwiz::input::KeyCode::MediaPause"),
+            input::MediaKeyCode::PlayPause => termwiz::input::KeyCode::MediaPlayPause,
+            input::MediaKeyCode::Reverse => todo!("termwiz::input::KeyCode::Reverse"),
+            input::MediaKeyCode::Stop => termwiz::input::KeyCode::MediaStop,
+            input::MediaKeyCode::FastForward => todo!("termwiz::input::KeyCode::FastForward"),
+            input::MediaKeyCode::Rewind => todo!("termwiz::input::KeyCode::Rewind"),
+            input::MediaKeyCode::TrackNext => termwiz::input::KeyCode::MediaNextTrack,
+            input::MediaKeyCode::TrackPrevious => termwiz::input::KeyCode::MediaPrevTrack,
+            input::MediaKeyCode::Record => todo!("termwiz::input::KeyCode::Record"),
+            input::MediaKeyCode::LowerVolume => termwiz::input::KeyCode::VolumeDown,
+            input::MediaKeyCode::RaiseVolume => termwiz::input::KeyCode::VolumeUp,
+            input::MediaKeyCode::MuteVolume => termwiz::input::KeyCode::VolumeMute,
+        },
+        KeyCode::Modifier(modifier_key_code) => match modifier_key_code {
+            input::ModifierKeyCode::LeftShift => todo!(),
+            input::ModifierKeyCode::LeftControl => todo!(),
+            input::ModifierKeyCode::LeftAlt => todo!(),
+            input::ModifierKeyCode::LeftSuper => todo!(),
+            input::ModifierKeyCode::LeftHyper => todo!(),
+            input::ModifierKeyCode::LeftMeta => todo!(),
+            input::ModifierKeyCode::RightShift => todo!(),
+            input::ModifierKeyCode::RightControl => todo!(),
+            input::ModifierKeyCode::RightAlt => todo!(),
+            input::ModifierKeyCode::RightSuper => todo!(),
+            input::ModifierKeyCode::RightHyper => todo!(),
+            input::ModifierKeyCode::RightMeta => todo!(),
+            input::ModifierKeyCode::IsoLevel3Shift => todo!(),
+            input::ModifierKeyCode::IsoLevel5Shift => todo!(),
+        },
+    }
+}
+
+fn mouse_button_to_termwiz(button: &MouseButton) -> termwiz::input::MouseButtons {
+    match button {
+        MouseButton::Left => termwiz::input::MouseButtons::LEFT,
+        MouseButton::Right => termwiz::input::MouseButtons::RIGHT,
+        MouseButton::Middle => termwiz::input::MouseButtons::MIDDLE,
+    }
+}
+
+fn key_modifiers_to_termwiz(modifiers: &KeyModifiers) -> termwiz::input::Modifiers {
+    let mut modifiers_ret = termwiz::input::Modifiers::empty();
+    if modifiers.contains(KeyModifiers::ALT) {
+        modifiers_ret.insert(termwiz::input::Modifiers::ALT);
+    }
+    if modifiers.contains(KeyModifiers::CONTROL) {
+        modifiers_ret.insert(termwiz::input::Modifiers::CTRL);
+    }
+    if modifiers.contains(KeyModifiers::SHIFT) {
+        modifiers_ret.insert(termwiz::input::Modifiers::SHIFT);
+    }
+    if modifiers.contains(KeyModifiers::SUPER) {
+        modifiers_ret.insert(termwiz::input::Modifiers::SUPER);
+    }
+    if modifiers.contains(KeyModifiers::NONE) {
+        modifiers_ret.insert(termwiz::input::Modifiers::NONE);
+    }
+    modifiers_ret
 }
 
 pub struct TerminalView {
@@ -376,62 +369,14 @@ impl TerminalView {
         }
     }
 
-    async fn handle_key_event(
-        &mut self,
-        id: TerminalId,
-        key: input::KeyEvent,
-    ) -> Result<(), helix_vte::error::Error> {
-        if self.chord_state == ChordState::Normal
-            && key.code == KeyCode::Char('q')
-            && key.modifiers.contains(KeyModifiers::CONTROL)
-        {
-            self.chord_state = ChordState::Quit1;
-            return Ok(());
-        } else if self.chord_state == ChordState::Quit1
-            && key.code == KeyCode::Char('q')
-            && key.modifiers.contains(KeyModifiers::CONTROL)
-        {
-            self.toggle_terminal();
-            return Ok(());
-        } else {
-            self.chord_state = ChordState::Normal;
-        }
-
-        if let Some(s) = resolve_key_event(key) {
-            self.registry.write(id, s).await?;
-        } else if let input::KeyCode::Char(ch) = key.code {
-            let mut tmp = [0u8; 4];
-            let s = ch.encode_utf8(&mut tmp);
-            self.registry.write(id, s).await?;
-        } else {
-            log::warn!("unhandled key event `{:?}`", key);
-        }
-
-        Ok(())
-    }
-
     async fn handle_input_event_async(
         &mut self,
         id: TerminalId,
         event: &input::Event,
     ) -> Result<(), helix_vte::error::Error> {
-        match event {
-            input::Event::FocusGained => (),
-            input::Event::FocusLost => (),
-            input::Event::Key(key) => self.handle_key_event(id, *key).await?,
-            input::Event::Mouse(evt) => self.handle_mouse_event(id, *evt).await?,
-            input::Event::Paste(_) => { /* TODO */ }
-            input::Event::Resize(cols, rows) => {
-                if let Some(term) = self.models.get_mut(&id) {
-                    let size = (*rows, *cols);
-                    self.viewport = size;
-                    term.get_mut().resize(size);
-                    let _ = self.registry.resize(id, size);
-                }
-            }
-            input::Event::IdleTimeout => (),
-        }
-
+        let event = input_from_input(event);
+        
+        self.registry.write()
         Ok(())
     }
 
