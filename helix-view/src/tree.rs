@@ -109,7 +109,7 @@ impl Tree {
         let mut node = Node::view(view);
         node.parent = parent;
         let node = self.nodes.insert(node);
-        self.get_mut(node).id = node;
+        self.get_mut(node).set_id(node);
 
         let container = match &mut self.nodes[parent] {
             Node {
@@ -147,7 +147,7 @@ impl Tree {
 
         let node = Node::view(view);
         let node = self.nodes.insert(node);
-        self.get_mut(node).id = node;
+        self.get_mut(node).set_id(node);
 
         let container = match &mut self.nodes[parent] {
             Node {
@@ -373,7 +373,7 @@ impl Tree {
             match &mut node.content {
                 Content::View(view) => {
                     // debug!!("setting view area {:?}", area);
-                    view.area = area;
+                    view.set_area(area);
                 } // TODO: call f()
                 Content::Container(container) => {
                     // debug!!("setting container area {:?}", area);
@@ -510,7 +510,7 @@ impl Tree {
             }
         };
         let (current_x, current_y) = match &self.nodes[self.focus].content {
-            Content::View(current_view) => (current_view.area.left(), current_view.area.top()),
+            Content::View(current_view) => (current_view.area().left(), current_view.area().top()),
             Content::Container(_) => unreachable!(),
         };
 
@@ -523,7 +523,7 @@ impl Tree {
                     // in a vertical container (and already correct based on previous search)
                     child_id = *container.children.iter().min_by_key(|id| {
                         let x = match &self.nodes[**id].content {
-                            Content::View(view) => view.area.left(),
+                            Content::View(view) => view.area().left(),
                             Content::Container(container) => container.area.left(),
                         };
                         (current_x as i16 - x as i16).abs()
@@ -534,7 +534,7 @@ impl Tree {
                     // in a horizontal container (and already correct based on previous search)
                     child_id = *container.children.iter().min_by_key(|id| {
                         let y = match &self.nodes[**id].content {
-                            Content::View(view) => view.area.top(),
+                            Content::View(view) => view.area().top(),
                             Content::Container(container) => container.area.top(),
                         };
                         (current_y as i16 - y as i16).abs()
@@ -611,16 +611,16 @@ impl Tree {
                     Content::View(focus_view),
                     Content::View(target_view),
                 ) => {
-                    let focus_pos = parent.children.iter().position(|id| focus_view.id == *id)?;
+                    let focus_pos = parent.children.iter().position(|id| focus_view.id() == *id)?;
                     let target_pos = parent
                         .children
                         .iter()
-                        .position(|id| target_view.id == *id)?;
+                        .position(|id| target_view.id() == *id)?;
                     // swap node positions so that traversal order is kept
-                    parent.children[focus_pos] = target_view.id;
-                    parent.children[target_pos] = focus_view.id;
+                    parent.children[focus_pos] = target_view.id();
+                    parent.children[target_pos] = focus_view.id();
                     // swap area so that views rendered at the correct location
-                    std::mem::swap(&mut focus_view.area, &mut target_view.area);
+                    std::mem::swap(&mut focus_view.area(), &mut target_view.area());
 
                     Some(())
                 }
@@ -645,11 +645,11 @@ impl Tree {
                     let focus_pos = focus_parent
                         .children
                         .iter()
-                        .position(|id| focus_view.id == *id)?;
+                        .position(|id| focus_view.id() == *id)?;
                     let target_pos = target_parent
                         .children
                         .iter()
-                        .position(|id| target_view.id == *id)?;
+                        .position(|id| target_view.id() == *id)?;
                     // re-parent target and focus nodes
                     std::mem::swap(
                         &mut focus_parent.children[focus_pos],
@@ -657,7 +657,7 @@ impl Tree {
                     );
                     std::mem::swap(&mut focus.parent, &mut target.parent);
                     // swap area so that views rendered at the correct location
-                    std::mem::swap(&mut focus_view.area, &mut target_view.area);
+                    std::mem::swap(&mut focus_view.area(), &mut target_view.area());
 
                     Some(())
                 }

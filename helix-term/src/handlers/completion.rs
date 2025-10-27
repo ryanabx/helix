@@ -87,7 +87,7 @@ fn show_completion(
     context: HashMap<CompletionProvider, ResponseContext>,
     trigger: Trigger,
 ) {
-    let (view, doc) = current_ref!(editor);
+    let (view, doc) = current_ref_doc!(editor);
     // check if the completion request is stale.
     //
     // Completions are completed asynchronously and therefore the user could
@@ -120,7 +120,7 @@ pub fn trigger_auto_completion(editor: &Editor, trigger_char_only: bool) {
     if !config.auto_completion {
         return;
     }
-    let (view, doc): (&helix_view::View, &helix_view::Document) = current_ref!(editor);
+    let (view, doc): (&helix_view::View, &helix_view::Document) = current_ref_doc!(editor);
     let mut text = doc.text().slice(..);
     let cursor = doc.selection(view.id).primary().cursor(text);
     text = doc.text().slice(..cursor);

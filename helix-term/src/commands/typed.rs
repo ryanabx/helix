@@ -397,7 +397,7 @@ fn write_impl(
     // Save an undo checkpoint for any outstanding changes.
     doc.append_changes_to_history(view);
 
-    let (view, doc) = current_ref!(cx.editor);
+    let (view, doc) = current_ref_doc!(cx.editor);
     let fmt = if config.auto_format && options.auto_format {
         doc.auto_format(cx.editor).map(|fmt| {
             let callback = make_format_callback(
@@ -590,7 +590,7 @@ fn format(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyh
         return Ok(());
     }
 
-    let (view, doc) = current_ref!(cx.editor);
+    let (view, doc) = current_ref_doc!(cx.editor);
     let format = doc.format(cx.editor).context(
         "A formatter isn't available, and no language server provides formatting capabilities",
     )?;
@@ -857,7 +857,7 @@ pub fn write_all_impl(
 
     for (doc_id, target_view) in saves {
         let doc = doc_mut!(cx.editor, &doc_id);
-        let view = view_mut!(cx.editor, target_view);
+        let view = view_mut_doc!(cx.editor, target_view);
 
         if doc.trim_trailing_whitespace() {
             trim_trailing_whitespace(doc, target_view);
@@ -1326,7 +1326,7 @@ fn get_character_info(
         return Ok(());
     }
 
-    let (view, doc) = current_ref!(cx.editor);
+    let (view, doc) = current_ref_doc!(cx.editor);
     let text = doc.text().slice(..);
 
     let grapheme_start = doc.selection(view.id).primary().cursor(text);
@@ -1488,7 +1488,7 @@ fn reload_all(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> 
         let doc = doc_mut!(cx.editor, &doc_id);
 
         // Every doc is guaranteed to have at least 1 view at this point.
-        let view = view_mut!(cx.editor, view_ids[0]);
+        let view = view_mut_doc!(cx.editor, view_ids[0]);
 
         // Ensure that the view is synced with the document's history.
         view.sync_changes(doc);
@@ -1506,7 +1506,7 @@ fn reload_all(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> 
         }
 
         for view_id in view_ids {
-            let view = view_mut!(cx.editor, view_id);
+            let view = view_mut_doc!(cx.editor, view_id);
             if view.doc.eq(&doc_id) {
                 view.ensure_cursor_in_view(doc, scrolloff);
             }
@@ -1803,7 +1803,7 @@ fn tree_sitter_highlight_name(
         return Ok(());
     }
 
-    let (view, doc) = current_ref!(cx.editor);
+    let (view, doc) = current_ref_doc!(cx.editor);
     let Some(syntax) = doc.syntax() else {
         return Ok(());
     };
@@ -2617,7 +2617,7 @@ fn yank_diagnostic(
         None => '+',
     };
 
-    let (view, doc) = current_ref!(cx.editor);
+    let (view, doc) = current_ref_doc!(cx.editor);
     let primary = doc.selection(view.id).primary();
 
     // Look only for diagnostics that intersect with the primary selection

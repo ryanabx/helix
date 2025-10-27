@@ -294,7 +294,7 @@ impl Completion {
             .with_scrollbar(false)
             .ignore_escape_key(true);
 
-        let (view, doc) = current_ref!(editor);
+        let (view, doc) = current_ref_doc!(editor);
         let text = doc.text().slice(..);
         let cursor = doc.selection(view.id).primary().cursor(text);
         let offset = text

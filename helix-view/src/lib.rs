@@ -48,7 +48,7 @@ pub enum Align {
     Bottom,
 }
 
-pub fn align_view(doc: &mut Document, view: &View, align: Align) {
+pub fn align_view(doc: &mut Document, view: &DocumentView, align: Align) {
     let doc_text = doc.text().slice(..);
     let cursor = doc.selection(view.id).primary().cursor(doc_text);
     let viewport = view.inner_area(doc);
@@ -78,3 +78,5 @@ pub use editor::Editor;
 use helix_core::char_idx_at_visual_offset;
 pub use theme::Theme;
 pub use view::View;
+
+use crate::view::DocumentView;

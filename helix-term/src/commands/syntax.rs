@@ -171,7 +171,7 @@ pub fn syntax_symbol_picker(cx: &mut Context) {
         (),
         move |cx, tag, action| {
             cx.editor.switch(doc_id, action);
-            let view = view_mut!(cx.editor);
+            let view = view_mut_doc!(cx.editor);
             let doc = doc_mut!(cx.editor, &doc_id);
             doc.set_selection(view.id, Selection::single(tag.start, tag.end));
             if action.align_view(view, doc.id()) {
@@ -409,7 +409,7 @@ pub fn syntax_workspace_symbol_picker(cx: &mut Context) {
                 }
             };
             let doc = doc_mut!(cx.editor, &doc_id);
-            let view = view_mut!(cx.editor);
+            let view = view_mut_doc!(cx.editor);
             let len_chars = doc.text().len_chars();
             if tag.start >= len_chars || tag.end > len_chars {
                 cx.editor.set_error("The location you jumped to does not exist anymore because the file has changed.");

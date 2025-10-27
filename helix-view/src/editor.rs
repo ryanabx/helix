@@ -1,19 +1,7 @@
 use crate::{
-    annotations::diagnostics::{DiagnosticFilter, InlineDiagnosticsConfig},
-    clipboard::ClipboardProvider,
-    document::{
+    annotations::diagnostics::{DiagnosticFilter, InlineDiagnosticsConfig}, clipboard::ClipboardProvider, document::{
         DocumentOpenError, DocumentSavedEventFuture, DocumentSavedEventResult, Mode, SavePoint,
-    },
-    events::{DocumentDidClose, DocumentDidOpen, DocumentFocusLost},
-    graphics::{CursorKind, Rect},
-    handlers::Handlers,
-    info::Info,
-    input::KeyEvent,
-    register::Registers,
-    terminal::{TerminalEvent, TerminalView},
-    theme::{self, Theme},
-    tree::{self, Tree},
-    Document, DocumentId, View, ViewId,
+    }, events::{DocumentDidClose, DocumentDidOpen, DocumentFocusLost}, graphics::{CursorKind, Rect}, handlers::Handlers, info::Info, input::KeyEvent, register::Registers, terminal::{TerminalEvent, TerminalView}, theme::{self, Theme}, tree::{self, Tree}, view::DocumentView, Document, DocumentId, View, ViewId
 };
 use helix_event::dispatch;
 use helix_vcs::DiffProviderRegistry;
@@ -1273,7 +1261,9 @@ pub enum Action {
 impl Action {
     /// Whether to align the view to the cursor after executing this action
     pub fn align_view(&self, view: &View, new_doc: DocumentId) -> bool {
-        !matches!((self, view.doc == new_doc), (Action::Load, false))
+        match view {
+            View::Document(view) => !matches!((self, view.doc == new_doc), (Action::Load, false)),
+        }
     }
 }
 
@@ -1558,41 +1548,45 @@ impl Editor {
     }
 
     pub fn set_doc_path(&mut self, doc_id: DocumentId, path: &Path) {
-        let doc = doc_mut!(self, &doc_id);
-        let old_path = doc.path();
+        if let Some(doc) = doc_mut!(self, &doc_id) {
+            let old_path = doc.path();
 
-        if let Some(old_path) = old_path {
-            // sanity check, should not occur but some callers (like an LSP) may
-            // create bogus calls
-            if old_path == path {
-                return;
+            if let Some(old_path) = old_path {
+                // sanity check, should not occur but some callers (like an LSP) may
+                // create bogus calls
+                if old_path == path {
+                    return;
+                }
+                // if we are open in LSPs send did_close notification
+                for language_server in doc.language_servers() {
+                    language_server.text_document_did_close(doc.identifier());
+                }
             }
-            // if we are open in LSPs send did_close notification
-            for language_server in doc.language_servers() {
-                language_server.text_document_did_close(doc.identifier());
-            }
+            // we need to clear the list of language servers here so that
+            // refresh_doc_language/refresh_language_servers doesn't resend
+            // text_document_did_close. Since we called `text_document_did_close`
+            // we have fully unregistered this document from its LS
+            doc.language_servers.clear();
+            doc.set_path(Some(path));
+            doc.detect_editor_config();
+            self.refresh_doc_language(doc_id)
         }
-        // we need to clear the list of language servers here so that
-        // refresh_doc_language/refresh_language_servers doesn't resend
-        // text_document_did_close. Since we called `text_document_did_close`
-        // we have fully unregistered this document from its LS
-        doc.language_servers.clear();
-        doc.set_path(Some(path));
-        doc.detect_editor_config();
-        self.refresh_doc_language(doc_id)
     }
 
     pub fn refresh_doc_language(&mut self, doc_id: DocumentId) {
-        let loader = self.syn_loader.load();
-        let doc = doc_mut!(self, &doc_id);
-        doc.detect_language(&loader);
-        doc.detect_editor_config();
-        doc.detect_indent_and_line_ending();
-        self.refresh_language_servers(doc_id);
-        let doc = doc_mut!(self, &doc_id);
-        let diagnostics = Editor::doc_diagnostics(&self.language_servers, &self.diagnostics, doc);
-        doc.replace_diagnostics(diagnostics, &[], None);
-        doc.reset_all_inlay_hints();
+        if let Some(doc) = doc_mut!(self, &doc_id) {
+            let loader = self.syn_loader.load();
+            doc.detect_language(&loader);
+            doc.detect_editor_config();
+            doc.detect_indent_and_line_ending();
+            self.refresh_language_servers(doc_id);
+            if let Some(doc) = doc_mut!(self, &doc_id) {
+                let diagnostics =
+                    Editor::doc_diagnostics(&self.language_servers, &self.diagnostics, doc);
+                doc.replace_diagnostics(diagnostics, &[], None);
+                doc.reset_all_inlay_hints();
+            }
+        }
     }
 
     /// Launch a language server for a given document
@@ -1690,10 +1684,13 @@ impl Editor {
         }
 
         for (view, _) in self.tree.views_mut() {
-            let doc = doc_mut!(self, &view.doc);
-            view.sync_changes(doc);
-            view.gutters = config.gutters.clone();
-            view.ensure_cursor_in_view(doc, config.scrolloff)
+            if let View::Document(view) = view {
+                if let Some(doc) = doc_mut!(self, &view.doc) {
+                    view.sync_changes(doc);
+                    view.gutters = config.gutters.clone();
+                    view.ensure_cursor_in_view(doc, config.scrolloff)
+                }
+            }
         }
     }
 
@@ -1701,14 +1698,16 @@ impl Editor {
         let scrolloff = self.config().scrolloff;
         let view = self.tree.get_mut(current_view);
 
-        view.doc = doc_id;
-        let doc = doc_mut!(self, &doc_id);
+        if let View::Document(view) = view {
+            view.doc = doc_id;
+            if let Some(doc) = doc_mut!(self, &doc_id) {
+                doc.ensure_view_init(view.id);
+                view.sync_changes(doc);
+                doc.mark_as_focused();
 
-        doc.ensure_view_init(view.id);
-        view.sync_changes(doc);
-        doc.mark_as_focused();
-
-        view.ensure_cursor_in_view(doc, scrolloff)
+                view.ensure_cursor_in_view(doc, scrolloff)
+            }
+        }
     }
 
     pub fn switch(&mut self, id: DocumentId, action: Action) {
@@ -1725,11 +1724,11 @@ impl Editor {
 
         let focust_lost = match action {
             Action::Replace => {
-                let (view, doc) = current_ref!(self);
-                // If the current view is an empty scratch buffer and is not displayed in any other views, delete it.
-                // Boolean value is determined before the call to `view_mut` because the operation requires a borrow
-                // of `self.tree`, which is mutably borrowed when `view_mut` is called.
-                let remove_empty_scratch = !doc.is_modified()
+                if let Some((view, doc)) = current_ref_doc!(self) {
+                    // If the current view is an empty scratch buffer and is not displayed in any other views, delete it.
+                    // Boolean value is determined before the call to `view_mut` because the operation requires a borrow
+                    // of `self.tree`, which is mutably borrowed when `view_mut` is called.
+                    let remove_empty_scratch = !doc.is_modified()
                     // If the buffer has no path and is not modified, it is an empty scratch buffer.
                     && doc.path().is_none()
                     // If the buffer we are changing to is not this buffer
@@ -1738,63 +1737,81 @@ impl Editor {
                     && !self
                         .tree
                         .traverse()
-                        .any(|(_, v)| v.doc == doc.id && v.id != view.id);
+                        .any(|(_, v)| if let View::Document(v) = v {v.doc == doc.id && v.id != view.id} else {false});
 
-                let (view, doc) = current!(self);
-                let view_id = view.id;
+                    if let Some((view, doc)) = current!(self) {
+                        let view_id = view.id;
 
-                // Append any outstanding changes to history in the old document.
-                doc.append_changes_to_history(view);
+                        // Append any outstanding changes to history in the old document.
+                        doc.append_changes_to_history(view);
 
-                if remove_empty_scratch {
-                    // Copy `doc.id` into a variable before calling `self.documents.remove`, which requires a mutable
-                    // borrow, invalidating direct access to `doc.id`.
-                    let id = doc.id;
-                    self.documents.remove(&id);
+                        if remove_empty_scratch {
+                            // Copy `doc.id` into a variable before calling `self.documents.remove`, which requires a mutable
+                            // borrow, invalidating direct access to `doc.id`.
+                            let id = doc.id;
+                            self.documents.remove(&id);
 
-                    // Remove the scratch buffer from any jumplists
-                    for (view, _) in self.tree.views_mut() {
-                        view.remove_document(&id);
-                    }
-                } else {
-                    let jump = (view.doc, doc.selection(view.id).clone());
-                    view.jumps.push(jump);
-                    // Set last accessed doc if it is a different document
-                    if doc.id != id {
-                        view.add_to_history(view.doc);
-                        // Set last modified doc if modified and last modified doc is different
-                        if std::mem::take(&mut doc.modified_since_accessed)
-                            && view.last_modified_docs[0] != Some(view.doc)
-                        {
-                            view.last_modified_docs = [Some(view.doc), view.last_modified_docs[0]];
+                            // Remove the scratch buffer from any jumplists
+                            for (view, _) in self.tree.views_mut() {
+                                if let View::Document(view) = view {
+                                    view.remove_document(&id);
+                                }
+                            }
+                        } else {
+                            let jump = (view.doc, doc.selection(view.id).clone());
+                            view.jumps.push(jump);
+                            // Set last accessed doc if it is a different document
+                            if doc.id != id {
+                                view.add_to_history(view.doc);
+                                // Set last modified doc if modified and last modified doc is different
+                                if std::mem::take(&mut doc.modified_since_accessed)
+                                    && view.last_modified_docs[0] != Some(view.doc)
+                                {
+                                    view.last_modified_docs =
+                                        [Some(view.doc), view.last_modified_docs[0]];
+                                }
+                            }
                         }
+
+                        self.replace_document_in_view(view_id, id);
+
+                        dispatch(DocumentFocusLost {
+                            editor: self,
+                            doc: id,
+                        });
                     }
                 }
-
-                self.replace_document_in_view(view_id, id);
-
-                dispatch(DocumentFocusLost {
-                    editor: self,
-                    doc: id,
-                });
                 return;
             }
             Action::Load => {
-                let view_id = view!(self).id;
-                let doc = doc_mut!(self, &id);
-                doc.ensure_view_init(view_id);
-                doc.mark_as_focused();
+                let view_id = view!(self).id();
+                if let Some(doc) = doc_mut!(self, &id) {
+                    doc.ensure_view_init(view_id);
+                    doc.mark_as_focused();
+                }
                 return;
             }
             Action::HorizontalSplit | Action::VerticalSplit => {
-                let focus_lost = self.tree.try_get(self.tree.focus).map(|view| view.doc);
+                let focus_lost = self.tree.try_get(self.tree.focus).and_then(|view| {
+                    if let View::Document(view) = view {
+                        Some(view.doc)
+                    } else {
+                        None
+                    }
+                });
                 // copy the current view, unless there is no view yet
                 let view = self
                     .tree
                     .try_get(self.tree.focus)
-                    .filter(|v| id == v.doc) // Different Document
+                    .filter(|v| {
+                        if let View::Document(v) = v {
+                            id == v.doc
+                        } else {
+                            false
+                        }
+                    }) // Different Document
                     .cloned()
-                    .unwrap_or_else(|| View::new(id, self.config().gutters.clone()));
+                    .unwrap_or_else(|| View::new_document(id, self.config().gutters.clone()));
                 let view_id = self.tree.split(
                     view,
                     match action {
@@ -1804,9 +1821,10 @@ impl Editor {
                     },
                 );
                 // initialize selection for view
-                let doc = doc_mut!(self, &id);
-                doc.ensure_view_init(view_id);
-                doc.mark_as_focused();
+                if let Some(doc) = doc_mut!(self, &id) {
+                    doc.ensure_view_init(view_id);
+                    doc.mark_as_focused();
+                }
                 focus_lost
             }
         };
@@ -1860,14 +1878,14 @@ impl Editor {
             self.syn_loader.clone(),
         );
         let doc_id = self.new_file_from_document(action, doc);
-        let doc = doc_mut!(self, &doc_id);
-        let view = view_mut!(self);
-        doc.ensure_view_init(view.id);
-        let transaction =
-            helix_core::Transaction::insert(doc.text(), doc.selection(view.id), stdin.into())
-                .with_selection(Selection::point(0));
-        doc.apply(&transaction, view.id);
-        doc.append_changes_to_history(view);
+        if let (Some(doc), Some(view)) = (doc_mut!(self, &doc_id), view_mut_doc!(self)) {
+            doc.ensure_view_init(view.id);
+            let transaction =
+                helix_core::Transaction::insert(doc.text(), doc.selection(view.id), stdin.into())
+                    .with_selection(Selection::point(0));
+            doc.apply(&transaction, view.id);
+            doc.append_changes_to_history(view);
+        }
         Ok(doc_id)
     }
 
@@ -1946,15 +1964,19 @@ impl Editor {
             .tree
             .views_mut()
             .filter_map(|(view, _focus)| {
-                view.remove_document(&doc_id);
+                if let View::Document(view) = view {
+                    view.remove_document(&doc_id);
 
-                if view.doc == doc_id {
-                    // something was previously open in the view, switch to previous doc
-                    if let Some(prev_doc) = view.docs_access_history.pop() {
-                        Some(Action::ReplaceDoc(view.id, prev_doc))
+                    if view.doc == doc_id {
+                        // something was previously open in the view, switch to previous doc
+                        if let Some(prev_doc) = view.docs_access_history.pop() {
+                            Some(Action::ReplaceDoc(view.id, prev_doc))
+                        } else {
+                            // only the document that is being closed was in the view, close it
+                            Some(Action::Close(view.id))
+                        }
                     } else {
-                        // only the document that is being closed was in the view, close it
-                        Some(Action::Close(view.id))
+                        None
                     }
                 } else {
                     None
@@ -1990,11 +2012,12 @@ impl Editor {
                         self.syn_loader.clone(),
                     ))
                 });
-            let view = View::new(doc_id, self.config().gutters.clone());
+            let view = View::new_document(doc_id, self.config().gutters.clone());
             let view_id = self.tree.insert(view);
-            let doc = doc_mut!(self, &doc_id);
-            doc.ensure_view_init(view_id);
-            doc.mark_as_focused();
+            if let Some(doc) = doc_mut!(self, &doc_id) {
+                doc.ensure_view_init(view_id);
+                doc.mark_as_focused();
+            }
         }
 
         self._refresh();
@@ -2014,29 +2037,30 @@ impl Editor {
         // via stream.then() ? then push into main future
 
         let path = path.map(|path| path.into());
-        let doc = doc_mut!(self, &doc_id);
-        let doc_save_future = doc.save(path, force)?;
+        if let Some(doc) = doc_mut!(self, &doc_id) {
+            let doc_save_future = doc.save(path, force)?;
 
-        // When a file is written to, notify the file event handler.
-        // Note: This can be removed once proper file watching is implemented.
-        let handler = self.language_servers.file_event_handler.clone();
-        let future = async move {
-            let res = doc_save_future.await;
-            if let Ok(event) = &res {
-                handler.file_changed(event.path.clone());
-            }
-            res
-        };
+            // When a file is written to, notify the file event handler.
+            // Note: This can be removed once proper file watching is implemented.
+            let handler = self.language_servers.file_event_handler.clone();
+            let future = async move {
+                let res = doc_save_future.await;
+                if let Ok(event) = &res {
+                    handler.file_changed(event.path.clone());
+                }
+                res
+            };
 
-        use futures_util::stream;
+            use futures_util::stream;
 
-        self.saves
-            .get(&doc_id)
-            .ok_or_else(|| anyhow::format_err!("saves are closed for this document!"))?
-            .send(stream::once(Box::pin(future)))
-            .map_err(|err| anyhow!("failed to send save event: {}", err))?;
+            self.saves
+                .get(&doc_id)
+                .ok_or_else(|| anyhow::format_err!("saves are closed for this document!"))?
+                .send(stream::once(Box::pin(future)))
+                .map_err(|err| anyhow!("failed to send save event: {}", err))?;
 
-        self.write_count += 1;
+            self.write_count += 1;
+        }
 
         Ok(())
     }
@@ -2054,23 +2078,32 @@ impl Editor {
 
         // Reset mode to normal and ensure any pending changes are committed in the old document.
         self.enter_normal_mode();
-        let (view, doc) = current!(self);
-        doc.append_changes_to_history(view);
-        self.ensure_cursor_in_view(view_id);
-        // Update jumplist selections with new document changes.
-        for (view, _focused) in self.tree.views_mut() {
-            let doc = doc_mut!(self, &view.doc);
-            view.sync_changes(doc);
+        if let Some((view, doc)) = current!(self) {
+            doc.append_changes_to_history(view);
+            self.ensure_cursor_in_view(view_id);
+            // Update jumplist selections with new document changes.
+            for (view, _focused) in self.tree.views_mut() {
+                if let View::Document(view) = view {
+                    if let Some(doc) = doc_mut!(self, &view.doc) {
+                        view.sync_changes(doc);
+                    }
+                }
+            }
+
+            let prev_id = std::mem::replace(&mut self.tree.focus, view_id);
+            if let Some(doc) = doc_mut!(self)
+            {
+                doc.mark_as_focused();
+            }
+
+            if let View::Document(view) = self.tree.get(prev_id) {
+                let focus_lost = view.doc;
+                dispatch(DocumentFocusLost {
+                    editor: self,
+                    doc: focus_lost,
+                });
+            }
         }
-
-        let prev_id = std::mem::replace(&mut self.tree.focus, view_id);
-        doc_mut!(self).mark_as_focused();
-
-        let focus_lost = self.tree.get(prev_id).doc;
-        dispatch(DocumentFocusLost {
-            editor: self,
-            doc: focus_lost,
-        });
     }
 
     pub fn focus_next(&mut self) {
@@ -2102,9 +2135,12 @@ impl Editor {
 
     pub fn ensure_cursor_in_view(&mut self, id: ViewId) {
         let config = self.config();
-        let view = self.tree.get(id);
-        let doc = doc_mut!(self, &view.doc);
-        view.ensure_cursor_in_view(doc, config.scrolloff)
+        if let View::Document(view) = self.tree.get(id)
+        {
+            if let Some(doc) = doc_mut!(self, &view.doc) {
+                view.ensure_cursor_in_view(doc, config.scrolloff)
+            }
+        }
     }
 
     #[inline]
@@ -2194,14 +2230,19 @@ impl Editor {
     /// or `None` if the primary cursor is not visible on screen.
     pub fn cursor(&self) -> (Option<Position>, CursorKind) {
         let config = self.config();
-        let (view, doc) = current_ref!(self);
-        if let Some(mut pos) = self.cursor_cache.get(view, doc) {
-            let inner = view.inner_area(doc);
-            pos.col += inner.x as usize;
-            pos.row += inner.y as usize;
-            let cursorkind = config.cursor_shape.from_mode(self.mode);
-            (Some(pos), cursorkind)
-        } else {
+        if let Some((view, doc)) = current_ref_doc!(self)
+        {
+            if let Some(mut pos) = self.cursor_cache.get(view, doc) {
+                let inner = view.inner_area(doc);
+                pos.col += inner.x as usize;
+                pos.row += inner.y as usize;
+                let cursorkind = config.cursor_shape.from_mode(self.mode);
+                (Some(pos), cursorkind)
+            } else {
+                (None, CursorKind::default())
+            }
+        }
+        else {
             (None, CursorKind::default())
         }
     }
@@ -2290,8 +2331,10 @@ impl Editor {
                     }
                 };
 
-                let doc = doc_mut!(self, &save_event.doc_id);
-                doc.set_last_saved_revision(save_event.revision, save_event.save_time);
+                if let Some(doc) = doc_mut!(self, &save_event.doc_id)
+                {
+                    doc.set_last_saved_revision(save_event.revision, save_event.save_time);
+                }
             }
         }
 
@@ -2307,25 +2350,27 @@ impl Editor {
         }
 
         self.mode = Mode::Normal;
-        let (view, doc) = current!(self);
-
-        try_restore_indent(doc, view);
-
-        // if leaving append mode, move cursor back by 1
-        if doc.restore_cursor {
-            let text = doc.text().slice(..);
-            let selection = doc.selection(view.id).clone().transform(|range| {
-                let mut head = range.to();
-                if range.head > range.anchor {
-                    head = graphemes::prev_grapheme_boundary(text, head);
-                }
-
-                Range::new(range.from(), head)
-            });
-
-            doc.set_selection(view.id, selection);
-            doc.restore_cursor = false;
+        if let Some((view, doc)) = current!(self)
+        {
+            try_restore_indent(doc, view);
+    
+            // if leaving append mode, move cursor back by 1
+            if doc.restore_cursor {
+                let text = doc.text().slice(..);
+                let selection = doc.selection(view.id).clone().transform(|range| {
+                    let mut head = range.to();
+                    if range.head > range.anchor {
+                        head = graphemes::prev_grapheme_boundary(text, head);
+                    }
+    
+                    Range::new(range.from(), head)
+                });
+    
+                doc.set_selection(view.id, selection);
+                doc.restore_cursor = false;
+            }
         }
+
     }
 
     pub fn current_stack_frame(&self) -> Option<&dap::StackFrame> {
@@ -2337,22 +2382,34 @@ impl Editor {
     /// if possible or there are no selections returns current_view
     /// otherwise uses an arbitrary view
     pub fn get_synced_view_id(&mut self, id: DocumentId) -> ViewId {
-        let current_view = view_mut!(self);
-        let doc = self.documents.get_mut(&id).unwrap();
-        if doc.selections().contains_key(&current_view.id) {
-            // only need to sync current view if this is not the current doc
-            if current_view.doc != id {
-                current_view.sync_changes(doc);
+        if let Some(current_view) = view_mut_doc!(self)
+        {
+            let doc = self.documents.get_mut(&id).unwrap();
+            if doc.selections().contains_key(&current_view.id) {
+                // only need to sync current view if this is not the current doc
+                if current_view.doc != id {
+                    current_view.sync_changes(doc);
+                }
+                current_view.id
+            } else if let Some(view_id) = doc.selections().keys().next() {
+                let view_id = *view_id;
+                let view = self.tree.get_mut(view_id);
+                if let View::Document(view) = view {
+                    view.sync_changes(doc);
+                    view_id
+                }
+                else {
+                    // No idea what to do here either
+                    todo!()
+                }
+            } else {
+                doc.ensure_view_init(current_view.id);
+                current_view.id
             }
-            current_view.id
-        } else if let Some(view_id) = doc.selections().keys().next() {
-            let view_id = *view_id;
-            let view = self.tree.get_mut(view_id);
-            view.sync_changes(doc);
-            view_id
-        } else {
-            doc.ensure_view_init(current_view.id);
-            current_view.id
+        }
+        else {
+            // No idea what to do here
+            todo!()
         }
     }
 
@@ -2367,7 +2424,7 @@ impl Editor {
     }
 }
 
-fn try_restore_indent(doc: &mut Document, view: &mut View) {
+fn try_restore_indent(doc: &mut Document, view: &mut DocumentView) {
     use helix_core::{
         chars::char_is_whitespace,
         line_ending::{line_end_char_index, str_is_line_ending},
@@ -2410,7 +2467,7 @@ fn try_restore_indent(doc: &mut Document, view: &mut View) {
 pub struct CursorCache(Cell<Option<Option<Position>>>);
 
 impl CursorCache {
-    pub fn get(&self, view: &View, doc: &Document) -> Option<Position> {
+    pub fn get(&self, view: &DocumentView, doc: &Document) -> Option<Position> {
         if let Some(pos) = self.0.get() {
             return pos;
         }

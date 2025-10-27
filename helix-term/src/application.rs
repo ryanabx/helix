@@ -1192,7 +1192,7 @@ impl Application {
         if let Some(range) = selection {
             // TODO: convert inside server
             if let Some(new_range) = lsp_range_to_range(doc.text(), range, offset_encoding) {
-                let view = view_mut!(self.editor);
+                let view = view_mut_doc!(self.editor);
 
                 // we flip the range so that the cursor sits on the start of the symbol
                 // (for example start of the function).

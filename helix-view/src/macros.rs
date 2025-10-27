@@ -12,19 +12,33 @@
 #[macro_export]
 macro_rules! current {
     ($editor:expr) => {{
-        let view = $crate::view_mut!($editor);
-        let id = view.doc;
-        let doc = $crate::doc_mut!($editor, &id);
-        (view, doc)
+        if let Some(view) = $crate::view_mut_doc!($editor)
+        {
+            let id = view.doc;
+            if let Some(doc) = $crate::doc_mut!($editor, &id)
+            {
+                Some((view, doc))
+            }
+            else {
+                None
+            }
+        }
+        else {
+            None
+        }
     }};
 }
 
 #[macro_export]
-macro_rules! current_ref {
+macro_rules! current_ref_doc {
     ($editor:expr) => {{
         let view = $editor.tree.get($editor.tree.focus);
-        let doc = &$editor.documents[&view.doc];
-        (view, doc)
+        if let View::Document(view) = view {
+            let doc = &$editor.documents[&view.doc];
+            Some((view, doc))
+        } else {
+            None
+        }
     }};
 }
 
@@ -33,22 +47,39 @@ macro_rules! current_ref {
 #[macro_export]
 macro_rules! doc_mut {
     ($editor:expr, $id:expr) => {{
-        $editor.documents.get_mut($id).unwrap()
+        Some($editor.documents.get_mut($id).unwrap())
     }};
     ($editor:expr) => {{
-        $crate::current!($editor).1
+        if let Some((_, doc)) = $crate::current!($editor) {
+            Some(doc)
+        }
+        else {
+            None
+        }
     }};
 }
 
-/// Get the current view mutably.
-/// Returns `&mut View`
+/// Get the current document view mutably, if it exists.
+/// Returns `&mut DocumentView`
 #[macro_export]
-macro_rules! view_mut {
+macro_rules! view_mut_doc {
     ($editor:expr, $id:expr) => {{
-        $editor.tree.get_mut($id)
+        let view = $editor.tree.get_mut($id);
+        if let View::Document(view) = view {
+            Some(view)
+        }
+        else {
+            None
+        }
     }};
     ($editor:expr) => {{
-        $editor.tree.get_mut($editor.tree.focus)
+        let view = $editor.tree.get_mut($editor.tree.focus);
+        if let View::Document(view) = view {
+            Some(view)
+        }
+        else {
+            None
+        }
     }};
 }
 
@@ -70,6 +101,11 @@ macro_rules! doc {
         &$editor.documents[$id]
     }};
     ($editor:expr) => {{
-        $crate::current_ref!($editor).1
+        if let Some((_, doc)) = $crate::current_ref_doc!($editor) {
+            Some(doc)
+        }
+        else {
+            None
+        }
     }};
 }

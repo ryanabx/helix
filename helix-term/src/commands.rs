@@ -1332,7 +1332,7 @@ fn goto_file_vsplit(cx: &mut Context) {
 
 /// Goto files in selection.
 fn goto_file_impl(cx: &mut Context, action: Action) {
-    let (view, doc) = current_ref!(cx.editor);
+    let (view, doc) = current_ref_doc!(cx.editor);
     let text = doc.text().slice(..);
     let selections = doc.selection(view.id);
     let primary = selections.primary();
@@ -2658,7 +2658,7 @@ fn global_search(cx: &mut Context) {
             };
 
             let line_num = *line_num;
-            let view = view_mut!(cx.editor);
+            let view = view_mut_doc!(cx.editor);
             let text = doc.text();
             if line_num >= text.len_lines() {
                 cx.editor.set_error(
@@ -2690,7 +2690,7 @@ enum Extend {
 }
 
 fn extend_line(cx: &mut Context) {
-    let (view, doc) = current_ref!(cx.editor);
+    let (view, doc) = current_ref_doc!(cx.editor);
     let extend = match doc.selection(view.id).primary().direction() {
         Direction::Forward => Extend::Below,
         Direction::Backward => Extend::Above,
@@ -3297,7 +3297,7 @@ fn jumplist_picker(cx: &mut Context) {
         |cx, meta, action| {
             cx.editor.switch(meta.id, action);
             let config = cx.editor.config();
-            let (view, doc) = (view_mut!(cx.editor), doc_mut!(cx.editor, &meta.id));
+            let (view, doc) = (view_mut_doc!(cx.editor), doc_mut!(cx.editor, &meta.id));
             doc.set_selection(view.id, meta.selection.clone());
             if action.align_view(view, doc.id()) {
                 view.ensure_cursor_in_view_center(doc, config.scrolloff);
@@ -3473,7 +3473,7 @@ pub fn command_palette(cx: &mut Context) {
                 if ctx.editor.tree.contains(focus) {
                     let config = ctx.editor.config();
                     let mode = ctx.editor.mode();
-                    let view = view_mut!(ctx.editor, focus);
+                    let view = view_mut_doc!(ctx.editor, focus);
                     let doc = doc_mut!(ctx.editor, &view.doc);
 
                     view.ensure_cursor_in_view(doc, config.scrolloff);
@@ -3604,7 +3604,7 @@ async fn make_format_callback(
 
         let scrolloff = editor.config().scrolloff;
         let doc = doc_mut!(editor, &doc_id);
-        let view = view_mut!(editor, view_id);
+        let view = view_mut_doc!(editor, view_id);
 
         match format {
             Ok(format) => {
@@ -3879,7 +3879,7 @@ fn goto_column_impl(cx: &mut Context, movement: Movement) {
 }
 
 fn goto_last_accessed_file(cx: &mut Context) {
-    let view = view_mut!(cx.editor);
+    let view = view_mut_doc!(cx.editor);
     if let Some(alt) = view.docs_access_history.pop() {
         cx.editor.switch(alt, Action::Replace);
     } else {
@@ -4153,7 +4153,7 @@ pub mod insert {
     use helix_view::editor::SmartTabConfig;
 
     pub fn insert_char(cx: &mut Context, c: char) {
-        let (view, doc) = current_ref!(cx.editor);
+        let (view, doc) = current_ref_doc!(cx.editor);
         let text = doc.text();
         let selection = doc.selection(view.id);
         let auto_pairs = doc.auto_pairs(cx.editor);
@@ -4172,7 +4172,7 @@ pub mod insert {
     }
 
     pub fn smart_tab(cx: &mut Context) {
-        let (view, doc) = current_ref!(cx.editor);
+        let (view, doc) = current_ref_doc!(cx.editor);
         let view_id = view.id;
 
         if matches!(
@@ -4263,7 +4263,7 @@ pub mod insert {
 
     pub fn insert_newline(cx: &mut Context) {
         let config = cx.editor.config();
-        let (view, doc) = current_ref!(cx.editor);
+        let (view, doc) = current_ref_doc!(cx.editor);
         let loader = cx.editor.syn_loader.load();
         let text = doc.text().slice(..);
         let line_ending = doc.line_ending.as_str();
@@ -4412,7 +4412,7 @@ pub mod insert {
 
     pub fn delete_char_backward(cx: &mut Context) {
         let count = cx.count();
-        let (view, doc) = current_ref!(cx.editor);
+        let (view, doc) = current_ref_doc!(cx.editor);
         let text = doc.text().slice(..);
         let tab_width = doc.tab_width();
         let indent_width = doc.indent_width();
@@ -4834,7 +4834,7 @@ fn replace_with_yanked_impl(editor: &mut Editor, register: char, count: usize) {
         return;
     };
     let scrolloff = editor.config().scrolloff;
-    let (view, doc) = current_ref!(editor);
+    let (view, doc) = current_ref_doc!(editor);
 
     let map_value = |value: &Cow<str>| {
         let value = LINE_ENDING_REGEX.replace_all(value, doc.line_ending.as_str());
@@ -5622,7 +5622,7 @@ fn match_brackets(cx: &mut Context) {
 fn jump_forward(cx: &mut Context) {
     let count = cx.count();
     let config = cx.editor.config();
-    let view = view_mut!(cx.editor);
+    let view = view_mut_doc!(cx.editor);
     let doc_id = view.doc;
 
     if let Some((id, selection)) = view.jumps.forward(count) {
@@ -6835,7 +6835,7 @@ fn jump_to_word(cx: &mut Context, behaviour: Movement) {
 
     let jump_label_limit = alphabet.len() * alphabet.len();
     let mut words = Vec::with_capacity(jump_label_limit);
-    let (view, doc) = current_ref!(cx.editor);
+    let (view, doc) = current_ref_doc!(cx.editor);
     let text = doc.text().slice(..);
 
     // This is not necessarily exact if there is virtual text like soft wrap.

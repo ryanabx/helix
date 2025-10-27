@@ -164,7 +164,7 @@ fn request_completions(
     editor: &mut Editor,
     compositor: &mut Compositor,
 ) {
-    let (view, doc) = current_ref!(editor);
+    let (view, doc) = current_ref_doc!(editor);
 
     if compositor
         .find::<ui::EditorView>()

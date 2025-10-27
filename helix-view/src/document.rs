@@ -43,12 +43,13 @@ use helix_core::{
     ChangeSet, Diagnostic, LineEnding, Range, Rope, RopeBuilder, Selection, Syntax, Transaction,
 };
 
+use crate::view::DocumentView;
 use crate::{
     editor::Config,
     events::{DocumentDidChange, SelectionDidChange},
     expansion,
     view::ViewPosition,
-    DocumentId, Editor, Theme, View, ViewId,
+    DocumentId, Editor, Theme, ViewId,
 };
 
 /// 8kB of buffer space for encoding and decoding `Rope`s.
@@ -1217,7 +1218,7 @@ impl Document {
     /// Reload the document from its path.
     pub fn reload(
         &mut self,
-        view: &mut View,
+        view: &mut DocumentView,
         provider_registry: &DiffProviderRegistry,
     ) -> Result<(), Error> {
         let encoding = self.encoding;
@@ -1585,7 +1586,7 @@ impl Document {
         self.apply_inner(transaction, view_id, false)
     }
 
-    fn undo_redo_impl(&mut self, view: &mut View, undo: bool) -> bool {
+    fn undo_redo_impl(&mut self, view: &mut DocumentView, undo: bool) -> bool {
         if undo {
             self.append_changes_to_history(view);
         } else if !self.changes.is_empty() {
@@ -1610,12 +1611,12 @@ impl Document {
     }
 
     /// Undo the last modification to the [`Document`]. Returns whether the undo was successful.
-    pub fn undo(&mut self, view: &mut View) -> bool {
+    pub fn undo(&mut self, view: &mut DocumentView) -> bool {
         self.undo_redo_impl(view, true)
     }
 
     /// Redo the last modification to the [`Document`]. Returns whether the redo was successful.
-    pub fn redo(&mut self, view: &mut View) -> bool {
+    pub fn redo(&mut self, view: &mut DocumentView) -> bool {
         self.undo_redo_impl(view, false)
     }
 
@@ -1624,7 +1625,7 @@ impl Document {
     /// The snapshot will remain valid (and updated) idenfinitly as long as ereferences to it exist.
     /// Restoring the snapshot will restore the selection and the contents of the document to
     /// the state it had when this function was called.
-    pub fn savepoint(&mut self, view: &View) -> Arc<SavePoint> {
+    pub fn savepoint(&mut self, view: &DocumentView) -> Arc<SavePoint> {
         let revert = Transaction::new(self.text()).with_selection(self.selection(view.id).clone());
         // check if there is already an existing (identical) savepoint around
         if let Some(savepoint) = self
@@ -1650,7 +1651,7 @@ impl Document {
         savepoint
     }
 
-    pub fn restore(&mut self, view: &mut View, savepoint: &SavePoint, emit_lsp_notification: bool) {
+    pub fn restore(&mut self, view: &mut DocumentView, savepoint: &SavePoint, emit_lsp_notification: bool) {
         assert_eq!(
             savepoint.view, view.id,
             "Savepoint must not be used with a different view!"
@@ -1670,7 +1671,7 @@ impl Document {
         self.savepoints.push(savepoint_ref)
     }
 
-    fn earlier_later_impl(&mut self, view: &mut View, uk: UndoKind, earlier: bool) -> bool {
+    fn earlier_later_impl(&mut self, view: &mut DocumentView, uk: UndoKind, earlier: bool) -> bool {
         if earlier {
             self.append_changes_to_history(view);
         } else if !self.changes.is_empty() {
@@ -1697,17 +1698,17 @@ impl Document {
     }
 
     /// Undo modifications to the [`Document`] according to `uk`.
-    pub fn earlier(&mut self, view: &mut View, uk: UndoKind) -> bool {
+    pub fn earlier(&mut self, view: &mut DocumentView, uk: UndoKind) -> bool {
         self.earlier_later_impl(view, uk, true)
     }
 
     /// Redo modifications to the [`Document`] according to `uk`.
-    pub fn later(&mut self, view: &mut View, uk: UndoKind) -> bool {
+    pub fn later(&mut self, view: &mut DocumentView, uk: UndoKind) -> bool {
         self.earlier_later_impl(view, uk, false)
     }
 
     /// Commit pending changes to history
-    pub fn append_changes_to_history(&mut self, view: &mut View) {
+    pub fn append_changes_to_history(&mut self, view: &mut DocumentView) {
         if self.changes.is_empty() {
             return;
         }

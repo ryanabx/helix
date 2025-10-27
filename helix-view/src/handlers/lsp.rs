@@ -7,6 +7,7 @@ use crate::events::{
     DiagnosticsDidChange, DocumentDidChange, DocumentDidClose, LanguageServerInitialized,
 };
 use crate::{DocumentId, Editor};
+use crate::View;
 use helix_core::diagnostic::DiagnosticProvider;
 use helix_core::Uri;
 use helix_event::register_hook;
@@ -109,24 +110,30 @@ impl Editor {
             }
         };
 
-        let doc = doc_mut!(self, &doc_id);
-        if let Some(version) = version {
-            if version != doc.version() {
-                let err = format!("outdated workspace edit for {path:?}");
-                log::error!("{err}, expected {} but got {version}", doc.version());
-                self.set_error(err);
-                return Err(ApplyEditErrorKind::DocumentChanged);
+        if let Some(doc) = doc_mut!(self, &doc_id)
+        {
+            if let Some(version) = version {
+                if version != doc.version() {
+                    let err = format!("outdated workspace edit for {path:?}");
+                    log::error!("{err}, expected {} but got {version}", doc.version());
+                    self.set_error(err);
+                    return Err(ApplyEditErrorKind::DocumentChanged);
+                }
             }
         }
 
         // Need to determine a view for apply/append_changes_to_history
         let view_id = self.get_synced_view_id(doc_id);
-        let doc = doc_mut!(self, &doc_id);
+        if let Some(doc) = doc_mut!(self, &doc_id)
+        {
+            let transaction = generate_transaction_from_edits(doc.text(), text_edits, offset_encoding);
+            if let Some(view) = view_mut_doc!(self, view_id)
+            {
+                doc.apply(&transaction, view.id);
+                doc.append_changes_to_history(view);
+            }
+        }
 
-        let transaction = generate_transaction_from_edits(doc.text(), text_edits, offset_encoding);
-        let view = view_mut!(self, view_id);
-        doc.apply(&transaction, view.id);
-        doc.append_changes_to_history(view);
         Ok(())
     }
 

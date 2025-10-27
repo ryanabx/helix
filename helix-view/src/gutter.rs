@@ -3,9 +3,7 @@ use std::fmt::Write;
 use helix_core::syntax::config::LanguageServerFeature;
 
 use crate::{
-    editor::GutterType,
-    graphics::{Style, UnderlineStyle},
-    Document, Editor, Theme, View,
+    editor::GutterType, graphics::{Style, UnderlineStyle}, view::DocumentView, Document, Editor, Theme
 };
 
 fn count_digits(n: usize) -> usize {
@@ -14,14 +12,14 @@ fn count_digits(n: usize) -> usize {
 
 pub type GutterFn<'doc> = Box<dyn FnMut(usize, bool, bool, &mut String) -> Option<Style> + 'doc>;
 pub type Gutter =
-    for<'doc> fn(&'doc Editor, &'doc Document, &View, &Theme, bool, usize) -> GutterFn<'doc>;
+    for<'doc> fn(&'doc Editor, &'doc Document, &DocumentView, &Theme, bool, usize) -> GutterFn<'doc>;
 
 impl GutterType {
     pub fn style<'doc>(
         self,
         editor: &'doc Editor,
         doc: &'doc Document,
-        view: &View,
+        view: &DocumentView,
         theme: &Theme,
         is_focused: bool,
     ) -> GutterFn<'doc> {
@@ -35,7 +33,7 @@ impl GutterType {
         }
     }
 
-    pub fn width(self, view: &View, doc: &Document) -> usize {
+    pub fn width(self, view: &DocumentView, doc: &Document) -> usize {
         match self {
             GutterType::Diagnostics => 1,
             GutterType::LineNumbers => line_numbers_width(view, doc),
@@ -48,7 +46,7 @@ impl GutterType {
 pub fn diagnostic<'doc>(
     _editor: &'doc Editor,
     doc: &'doc Document,
-    _view: &View,
+    _view: &DocumentView,
     theme: &Theme,
     _is_focused: bool,
 ) -> GutterFn<'doc> {
@@ -90,7 +88,7 @@ pub fn diagnostic<'doc>(
 pub fn diff<'doc>(
     _editor: &'doc Editor,
     doc: &'doc Document,
-    _view: &View,
+    _view: &DocumentView,
     theme: &Theme,
     _is_focused: bool,
 ) -> GutterFn<'doc> {
@@ -142,7 +140,7 @@ pub fn diff<'doc>(
 pub fn line_numbers<'doc>(
     editor: &'doc Editor,
     doc: &'doc Document,
-    view: &View,
+    view: &DocumentView,
     theme: &Theme,
     is_focused: bool,
 ) -> GutterFn<'doc> {
@@ -207,7 +205,7 @@ pub fn line_numbers<'doc>(
 /// The width of the gutter depends on the number of lines in the document,
 /// whether there is content on the last line (the `~` line), and the
 /// `editor.gutters.line-numbers.min-width` settings.
-fn line_numbers_width(view: &View, doc: &Document) -> usize {
+fn line_numbers_width(view: &DocumentView, doc: &Document) -> usize {
     let text = doc.text();
     let last_line = text.len_lines().saturating_sub(1);
     let draw_last = text.line_to_byte(last_line) < text.len_bytes();
@@ -220,7 +218,7 @@ fn line_numbers_width(view: &View, doc: &Document) -> usize {
 pub fn padding<'doc>(
     _editor: &'doc Editor,
     _doc: &'doc Document,
-    _view: &View,
+    _view: &DocumentView,
     _theme: &Theme,
     _is_focused: bool,
 ) -> GutterFn<'doc> {
@@ -230,7 +228,7 @@ pub fn padding<'doc>(
 pub fn breakpoints<'doc>(
     editor: &'doc Editor,
     doc: &'doc Document,
-    _view: &View,
+    _view: &DocumentView,
     theme: &Theme,
     _is_focused: bool,
 ) -> GutterFn<'doc> {
@@ -309,7 +307,7 @@ fn execution_pause_indicator<'doc>(
 pub fn diagnostics_or_breakpoints<'doc>(
     editor: &'doc Editor,
     doc: &'doc Document,
-    view: &View,
+    view: &DocumentView,
     theme: &Theme,
     is_focused: bool,
 ) -> GutterFn<'doc> {

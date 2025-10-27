@@ -31,7 +31,7 @@ pub(super) fn completion(
         .unwrap_or(config.trigger_length)
         .get() as usize;
 
-    let (view, doc) = current_ref!(editor);
+    let (view, doc) = current_ref_doc!(editor);
     let rope = doc.text().clone();
     let word_index = editor.handlers.word_index().clone();
     let text = doc.text().slice(..);

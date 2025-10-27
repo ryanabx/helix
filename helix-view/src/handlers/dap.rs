@@ -11,6 +11,8 @@ use serde_json::{json, Value};
 use std::fmt::Write;
 use std::path::PathBuf;
 
+use crate::View;
+
 #[macro_export]
 macro_rules! debugger {
     ($editor:expr) => {{
@@ -71,18 +73,20 @@ pub fn jump_to_stack_frame(editor: &mut Editor, frame: &helix_dap::StackFrame) {
         return;
     }
 
-    let (view, doc) = current!(editor);
+    if let Some((view, doc)) = current!(editor)
+    {
+        let text_end = doc.text().len_chars().saturating_sub(1);
+        let start = dap_pos_to_pos(doc.text(), frame.line, frame.column).unwrap_or(0);
+        let end = frame
+            .end_line
+            .and_then(|end_line| dap_pos_to_pos(doc.text(), end_line, frame.end_column.unwrap_or(0)))
+            .unwrap_or(start);
+    
+        let selection = Selection::single(start.min(text_end), end.min(text_end));
+        doc.set_selection(view.id, selection);
+        align_view(doc, view, Align::Center);
+    }
 
-    let text_end = doc.text().len_chars().saturating_sub(1);
-    let start = dap_pos_to_pos(doc.text(), frame.line, frame.column).unwrap_or(0);
-    let end = frame
-        .end_line
-        .and_then(|end_line| dap_pos_to_pos(doc.text(), end_line, frame.end_column.unwrap_or(0)))
-        .unwrap_or(start);
-
-    let selection = Selection::single(start.min(text_end), end.min(text_end));
-    doc.set_selection(view.id, selection);
-    align_view(doc, view, Align::Center);
 }
 
 pub fn breakpoints_changed(

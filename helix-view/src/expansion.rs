@@ -6,6 +6,8 @@ use anyhow::{anyhow, bail, Result};
 
 use crate::Editor;
 
+use crate::View;
+
 /// Variables that can be expanded in the command mode (`:`) via the expansion syntax.
 ///
 /// For example `%{cursor_line}`.
@@ -222,54 +224,60 @@ fn expand_inner<'a>(editor: &Editor, content: Cow<'a, str>) -> Result<Cow<'a, st
 // known strings like the scratch buffer name or line ending strings though, so this function
 // returns a `Cow<'static, str>` instead.
 fn expand_variable(editor: &Editor, variable: Variable) -> Result<Cow<'static, str>> {
-    let (view, doc) = current_ref!(editor);
-    let text = doc.text().slice(..);
-
-    match variable {
-        Variable::CursorLine => {
-            let cursor_line = doc.selection(view.id).primary().cursor_line(text);
-            Ok(Cow::Owned((cursor_line + 1).to_string()))
-        }
-        Variable::CursorColumn => {
-            let cursor = doc.selection(view.id).primary().cursor(text);
-            let position = helix_core::coords_at_pos(text, cursor);
-            Ok(Cow::Owned((position.col + 1).to_string()))
-        }
-        Variable::BufferName => {
-            // Note: usually we would use `Document::display_name` but we can statically borrow
-            // the scratch buffer name by partially reimplementing `display_name`.
-            if let Some(path) = doc.relative_path() {
-                Ok(Cow::Owned(path.to_string_lossy().into_owned()))
-            } else {
-                Ok(Cow::Borrowed(crate::document::SCRATCH_BUFFER_NAME))
+    if let Some((view, doc)) = current_ref_doc!(editor)
+    {
+        let text = doc.text().slice(..);
+    
+        match variable {
+            Variable::CursorLine => {
+                let cursor_line = doc.selection(view.id).primary().cursor_line(text);
+                Ok(Cow::Owned((cursor_line + 1).to_string()))
+            }
+            Variable::CursorColumn => {
+                let cursor = doc.selection(view.id).primary().cursor(text);
+                let position = helix_core::coords_at_pos(text, cursor);
+                Ok(Cow::Owned((position.col + 1).to_string()))
+            }
+            Variable::BufferName => {
+                // Note: usually we would use `Document::display_name` but we can statically borrow
+                // the scratch buffer name by partially reimplementing `display_name`.
+                if let Some(path) = doc.relative_path() {
+                    Ok(Cow::Owned(path.to_string_lossy().into_owned()))
+                } else {
+                    Ok(Cow::Borrowed(crate::document::SCRATCH_BUFFER_NAME))
+                }
+            }
+            Variable::LineEnding => Ok(Cow::Borrowed(doc.line_ending.as_str())),
+            Variable::CurrentWorkingDirectory => Ok(std::borrow::Cow::Owned(
+                helix_stdx::env::current_working_dir()
+                    .to_string_lossy()
+                    .to_string(),
+            )),
+            Variable::WorkspaceDirectory => Ok(std::borrow::Cow::Owned(
+                helix_loader::find_workspace()
+                    .0
+                    .to_string_lossy()
+                    .to_string(),
+            )),
+            Variable::Language => Ok(match doc.language_name() {
+                Some(lang) => Cow::Owned(lang.to_owned()),
+                None => Cow::Borrowed("text"),
+            }),
+            Variable::Selection => Ok(Cow::Owned(
+                doc.selection(view.id).primary().fragment(text).to_string(),
+            )),
+            Variable::SelectionLineStart => {
+                let start_line = doc.selection(view.id).primary().line_range(text).0;
+                Ok(Cow::Owned((start_line + 1).to_string()))
+            }
+            Variable::SelectionLineEnd => {
+                let end_line = doc.selection(view.id).primary().line_range(text).1;
+                Ok(Cow::Owned((end_line + 1).to_string()))
             }
         }
-        Variable::LineEnding => Ok(Cow::Borrowed(doc.line_ending.as_str())),
-        Variable::CurrentWorkingDirectory => Ok(std::borrow::Cow::Owned(
-            helix_stdx::env::current_working_dir()
-                .to_string_lossy()
-                .to_string(),
-        )),
-        Variable::WorkspaceDirectory => Ok(std::borrow::Cow::Owned(
-            helix_loader::find_workspace()
-                .0
-                .to_string_lossy()
-                .to_string(),
-        )),
-        Variable::Language => Ok(match doc.language_name() {
-            Some(lang) => Cow::Owned(lang.to_owned()),
-            None => Cow::Borrowed("text"),
-        }),
-        Variable::Selection => Ok(Cow::Owned(
-            doc.selection(view.id).primary().fragment(text).to_string(),
-        )),
-        Variable::SelectionLineStart => {
-            let start_line = doc.selection(view.id).primary().line_range(text).0;
-            Ok(Cow::Owned((start_line + 1).to_string()))
-        }
-        Variable::SelectionLineEnd => {
-            let end_line = doc.selection(view.id).primary().line_range(text).1;
-            Ok(Cow::Owned((end_line + 1).to_string()))
-        }
+    }
+    else {
+        // Don't know what to do here
+        todo!()
     }
 }

@@ -4,6 +4,8 @@ use anyhow::Result;
 use arc_swap::access::DynAccess;
 use helix_core::NATIVE_LINE_ENDING;
 
+use crate::View;
+
 use crate::{
     clipboard::{ClipboardError, ClipboardProvider, ClipboardType},
     Editor,
@@ -44,22 +46,41 @@ impl Registers {
         match name {
             '_' => Some(RegisterValues::new(iter::empty())),
             '#' => {
-                let (view, doc) = current_ref!(editor);
-                let selections = doc.selection(view.id).len();
-                // ExactSizeIterator is implemented for Range<usize> but
-                // not RangeInclusive<usize>.
-                Some(RegisterValues::new(
-                    (0..selections).map(|i| (i + 1).to_string().into()),
-                ))
+                if let Some((view, doc)) = current_ref_doc!(editor)
+                {
+                    let selections = doc.selection(view.id).len();
+                    // ExactSizeIterator is implemented for Range<usize> but
+                    // not RangeInclusive<usize>.
+                    Some(RegisterValues::new(
+                        (0..selections).map(|i| (i + 1).to_string().into()),
+                    ))
+                }
+                else {
+                    // Don't know what to do here
+                    todo!()
+                }
             }
             '.' => {
-                let (view, doc) = current_ref!(editor);
-                let text = doc.text().slice(..);
-                Some(RegisterValues::new(doc.selection(view.id).fragments(text)))
+                if let Some((view, doc)) = current_ref_doc!(editor)
+                {
+                    let text = doc.text().slice(..);
+                    Some(RegisterValues::new(doc.selection(view.id).fragments(text)))
+                }
+                else {
+                    // Don't know what to do here
+                    todo!()
+                }
             }
             '%' => {
-                let path = doc!(editor).display_name();
-                Some(RegisterValues::new(iter::once(path)))
+                if let Some(doc) = doc!(editor)
+                {
+                    let path = doc.display_name();
+                    Some(RegisterValues::new(iter::once(path)))
+                }
+                else {
+                    // Don't know what to do here
+                    todo!()
+                }
             }
             '*' | '+' => Some(read_from_clipboard(
                 &self.clipboard_provider.load(),

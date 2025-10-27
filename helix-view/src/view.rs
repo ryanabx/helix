@@ -125,7 +125,7 @@ pub struct ViewPosition {
 }
 
 #[derive(Clone)]
-pub struct View {
+pub struct DocumentView {
     pub id: ViewId,
     pub area: Rect,
     pub doc: DocumentId,
@@ -156,7 +156,7 @@ pub struct View {
     pub diagnostics_handler: DiagnosticsHandler,
 }
 
-impl fmt::Debug for View {
+impl fmt::Debug for DocumentView {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("View")
             .field("id", &self.id)
@@ -166,7 +166,44 @@ impl fmt::Debug for View {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum View {
+    Document(DocumentView),
+}
+
 impl View {
+    pub fn new_document(doc: DocumentId, gutters: GutterConfig) -> Self {
+        Self::Document(DocumentView::new(doc, gutters))
+    }
+
+    pub fn id(&self) -> ViewId {
+        match self {
+            View::Document(view) => view.id,
+        }
+    }
+
+    pub fn set_id(&mut self, id: ViewId) {
+        match self {
+            View::Document(view) => view.id = id
+        }
+    }
+
+    pub fn area(&self) -> Rect {
+        match self {
+            View::Document(view) => view.area,
+        }
+    }
+
+    pub fn set_area(&mut self, area: Rect) {
+        match self {
+            View::Document(view) => view.area = area
+        }
+    }
+}
+
+
+
+impl DocumentView {
     pub fn new(doc: DocumentId, gutters: GutterConfig) -> Self {
         Self {
             id: ViewId::default(),

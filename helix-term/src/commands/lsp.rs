@@ -142,7 +142,7 @@ fn jump_to_position(
             return;
         }
     };
-    let view = view_mut!(editor);
+    let view = view_mut_doc!(editor);
     // TODO: convert inside server
     let new_range = if let Some(new_range) = lsp_range_to_range(doc.text(), range, offset_encoding)
     {
@@ -889,7 +889,7 @@ where
     P: Fn(&Client, lsp::Position, lsp::TextDocumentIdentifier) -> Option<F>,
     F: Future<Output = helix_lsp::Result<Option<lsp::GotoDefinitionResponse>>> + 'static + Send,
 {
-    let (view, doc) = current_ref!(cx.editor);
+    let (view, doc) = current_ref_doc!(cx.editor);
     let mut futures: FuturesOrdered<_> = doc
         .language_servers_with_feature(feature)
         .map(|language_server| {
@@ -984,7 +984,7 @@ pub fn goto_implementation(cx: &mut Context) {
 
 pub fn goto_reference(cx: &mut Context) {
     let config = cx.editor.config();
-    let (view, doc) = current_ref!(cx.editor);
+    let (view, doc) = current_ref_doc!(cx.editor);
 
     let mut futures: FuturesOrdered<_> = doc
         .language_servers_with_feature(LanguageServerFeature::GotoReference)
@@ -1091,7 +1091,7 @@ pub fn hover(cx: &mut Context) {
 
 pub fn rename_symbol(cx: &mut Context) {
     fn get_prefill_from_word_boundary(editor: &Editor) -> String {
-        let (view, doc) = current_ref!(editor);
+        let (view, doc) = current_ref_doc!(editor);
         let text = doc.text().slice(..);
         let primary_selection = doc.selection(view.id).primary();
         if primary_selection.len() > 1 {
@@ -1174,7 +1174,7 @@ pub fn rename_symbol(cx: &mut Context) {
         Box::new(prompt)
     }
 
-    let (view, doc) = current_ref!(cx.editor);
+    let (view, doc) = current_ref_doc!(cx.editor);
     let history_register = cx.register;
 
     if doc
